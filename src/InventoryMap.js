@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { format, addDays, getISOWeek, isWeekend } from "date-fns";
 import { pl } from "date-fns/locale";
+import "./InventoryMap.css"; // Upewnij się, że ten plik istnieje!
 
 const factoryIcon = new L.Icon({
   iconUrl: "https://cdn-icons-png.flaticon.com/512/2991/2991132.png",
@@ -49,11 +50,80 @@ const initialData = [
   { id: 34, plant: "Pełkinie", name: "Pełkinie - Odpad 2", position: [50.0312, 22.6834], inventory: 19, limits: { mid: 25, high: 40 }, type: "odpad" },
   { id: 35, plant: "Pełkinie", name: "Pełkinie - Odpad 3", position: [50.0313, 22.6836], inventory: 12, limits: { mid: 25, high: 40 }, type: "odpad" }
 ];
+
 const InventoryMap = () => {
   const [data, setData] = useState(initialData);
   const [filter, setFilter] = useState("wszystkie");
+  const [search, setSearch] = useState("");
+  const [darkMode, setDarkMode] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
-  const filteredData = filter === "wszystkie" ? data : data.filter(item => item.type === filter);
+  const handleInventoryChange = (id, value) => {
+    setData(prev =>
+      prev.map(item =>
+        item.id === id ? { ...item, inventory: Number(value) } : item
+      )
+    );
+  };
+
+  const handleLimitChange = (id, field, value) => {
+    setData(prev =>
+      prev.map(item =>
+        item.id === id
+          ? { ...item, limits: { ...item.limits, [field]: Number(value) } }
+          : item
+      )
+    );
+  };
+
+  const getNextWeekday = (startDate, daysToAdd) => {
+    let date = addDays(startDate, daysToAdd);
+    while (isWeekend(date)) {
+      date = addDays(date, 1);
+    }
+    return date;
+  };
+
+  const filteredData = data
+    .filter(item => filter === "wszystkie" || item.type === filter)
+    .filter(item => item.name.toLowerCase().includes(search.toLowerCase()));
+
+  const paginatedData = filteredData.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+
+  const exportCSV = () => {
+    const headers = ["Magazyn", "Typ", "Zapas", "Mid", "High"];
+    const rows = filteredData.map(item => [
+      item.name,
+      item.type,
+      item.inventory,
+      item.limits.mid,
+      item.limits.high
+    ]);
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [headers, ...rows].map(e => e.join(",")).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "zapas.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const avgLat = data.reduce((sum, cur) => sum + cur.position[0], 0) / data.length;
+  const avgLng = data.reduce((sum, cur) => sum + cur.position[1], 0) / data.length;
+  useEffect(() => {
+  setTimeout(() => {
+    window.dispatchEvent(new Event("resize"));
+  }, 100);
+}, []);
 
   const groupedByPlant = data.reduce((acc, item) => {
     if (!acc[item.plant]) acc[item.plant] = [];
@@ -67,39 +137,30 @@ const InventoryMap = () => {
     return { plant, lat: avgLat, lng: avgLng, items: entries };
   });
 
-  const handleLimitChange = (id, field, value) => {
-    setData(prev =>
-      prev.map(item =>
-        item.id === id ? { ...item, limits: { ...item.limits, [field]: Number(value) } } : item
-      )
-    );
-  };
-
-  const handleInventoryChange = (id, value) => {
-    setData(prev =>
-      prev.map(item => (item.id === id ? { ...item, inventory: Number(value) } : item))
-    );
-  };
-
-  const avgLat = data.reduce((sum, cur) => sum + cur.position[0], 0) / data.length;
-  const avgLng = data.reduce((sum, cur) => sum + cur.position[1], 0) / data.length;
-
-  const getNextWeekday = (startDate, daysToAdd) => {
-    let date = addDays(startDate, daysToAdd);
-    while (isWeekend(date)) {
-      date = addDays(date, 1);
-    }
-    return date;
-  };
-
   return (
-    <div>
+    <div className={darkMode ? "dark-mode" : ""}>
       <h2 style={{ textAlign: "center", marginTop: "10px" }}>Mapa zakładów</h2>
 
-      <MapContainer center={[avgLat, avgLng]} zoom={6} style={{ height: "500px", width: "100%" }}>
+      <div className="controls" style={{ textAlign: "center", marginBottom: "10px" }}>
+        <button onClick={() => setFilter("wszystkie")}>Wszystkie</button>
+        <button onClick={() => setFilter("produkt")}>Produkty</button>
+        <button onClick={() => setFilter("odpad")}>Odpady</button>
+        <input
+          type="text"
+          placeholder="Szukaj..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <button onClick={exportCSV}>📤 Eksportuj CSV</button>
+        <button onClick={() => setDarkMode(!darkMode)}>
+          {darkMode ? "☀️ Jasny" : "🌙 Ciemny"}
+        </button>
+      </div>
+
+      <MapContainer center={[avgLat, avgLng]} zoom={6} className="leaflet-container">
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution="&copy; <a href='https://osm.org/copyright'>OpenStreetMap</a> contributors"
+          attribution="&copy; OpenStreetMap"
         />
         {plantCoordinates.map(({ plant, lat, lng, items }) => (
           <Marker key={plant} position={[lat, lng]} icon={factoryIcon}>
@@ -107,11 +168,35 @@ const InventoryMap = () => {
               <strong>{plant}</strong>
               <ul>
                 {items.map(item => (
-                  <li key={item.id} style={{ marginTop: 8 }}>
-                    {item.name}<br />
-                    <label>Zapas: <input type="number" value={item.inventory} onChange={e => handleInventoryChange(item.id, e.target.value)} style={{ width: 60 }} /></label><br />
-                    <label>Mid: <input type="number" value={item.limits.mid} onChange={e => handleLimitChange(item.id, 'mid', e.target.value)} style={{ width: 60 }} /></label><br />
-                    <label>High: <input type="number" value={item.limits.high} onChange={e => handleLimitChange(item.id, 'high', e.target.value)} style={{ width: 60 }} /></label>
+                  <li key={item.id}>
+                    {item.name}
+                    <br />
+                    <label>
+                      Zapas:{" "}
+                      <input
+                        type="number"
+                        value={item.inventory}
+                        onChange={e => handleInventoryChange(item.id, e.target.value)}
+                      />
+                    </label>
+                    <br />
+                    <label>
+                      Mid:{" "}
+                      <input
+                        type="number"
+                        value={item.limits.mid}
+                        onChange={e => handleLimitChange(item.id, "mid", e.target.value)}
+                      />
+                    </label>
+                    <br />
+                    <label>
+                      High:{" "}
+                      <input
+                        type="number"
+                        value={item.limits.high}
+                        onChange={e => handleLimitChange(item.id, "high", e.target.value)}
+                      />
+                    </label>
                   </li>
                 ))}
               </ul>
@@ -120,13 +205,7 @@ const InventoryMap = () => {
         ))}
       </MapContainer>
 
-      <div style={{ textAlign: "center", marginTop: "10px" }}>
-        <button onClick={() => setFilter("wszystkie")}>Wszystkie</button>
-        <button onClick={() => setFilter("produkt")}>Produkt Gotowy</button>
-        <button onClick={() => setFilter("odpad")}>Odpad</button>
-      </div>
-
-      <table style={{ width: "100%", marginTop: "20px", borderCollapse: "collapse" }} border="1">
+      <table>
         <thead>
           <tr>
             <th>Magazyn</th>
@@ -136,7 +215,7 @@ const InventoryMap = () => {
           </tr>
         </thead>
         <tbody>
-          {filteredData.map(item => {
+          {paginatedData.map(item => {
             let forecastText = "";
             let highlight = false;
             let inventoryBgColor = "white";
@@ -155,22 +234,36 @@ const InventoryMap = () => {
             }
 
             if (item.type === "produkt") {
-              if (item.inventory > item.limits.high) inventoryBgColor = "#f8d7da"; // red
-              else if (item.inventory > item.limits.mid) inventoryBgColor = "#fff3cd"; // yellow
-              else inventoryBgColor = "#d4edda"; // green
+              if (item.inventory > item.limits.high) inventoryBgColor = "#f8d7da";
+              else if (item.inventory > item.limits.mid) inventoryBgColor = "#fff3cd";
+              else inventoryBgColor = "#d4edda";
             }
 
             return (
-              <tr key={item.id} style={{ backgroundColor: highlight ? '#f8d7da' : 'white' }}>
+              <tr key={item.id} style={{ backgroundColor: highlight ? "#f8d7da" : undefined }}>
                 <td>{item.name}</td>
                 <td>{item.type}</td>
-                <td style={{ backgroundColor: item.type === 'produkt' ? inventoryBgColor : undefined }}>{item.inventory}</td>
+                <td style={{ backgroundColor: item.type === "produkt" ? inventoryBgColor : undefined }}>
+                  {item.inventory}
+                </td>
                 <td>{item.type === "odpad" ? forecastText : ""}</td>
               </tr>
             );
           })}
         </tbody>
       </table>
+
+      <div className="pagination">
+        {Array.from({ length: totalPages }, (_, i) => (
+          <button
+            key={i}
+            onClick={() => setCurrentPage(i + 1)}
+            className={currentPage === i + 1 ? "active" : ""}
+          >
+            {i + 1}
+          </button>
+        ))}
+      </div>
     </div>
   );
 };
